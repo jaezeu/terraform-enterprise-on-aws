@@ -27,6 +27,9 @@ module "tfe_hvd" {
   tfe_tls_cert_secret_arn            = var.tfe_tls_cert_secret_arn
   tfe_tls_privkey_secret_arn         = var.tfe_tls_privkey_secret_arn
   tfe_tls_ca_bundle_secret_arn       = var.tfe_tls_ca_bundle_secret_arn
+
+  #RDS
+  rds_skip_final_snapshot = true #For testing purposes only. In production, you should set this to false and provide a final snapshot identifier.
 }
 
 module "tfe_vpc" {

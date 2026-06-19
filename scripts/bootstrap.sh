@@ -1,0 +1,195 @@
+#!/usr/bin/env bash
+# =============================================================================
+# create_tfe_secrets.sh
+# Creates all 6 Secrets Manager secrets required by terraform-aws-terraform-
+# enterprise-hvd. Generates a self-signed CA + TLS cert for the given domain.
+#
+# Prerequisites:
+#   - aws cli (configured with appropriate credentials/profile)
+#   - openssl
+#
+# Required env vars:
+#   TFE_DOMAIN          e.g. tfe-demo.example.com
+#   AWS_REGION          e.g. ap-southeast-1
+#   SECRET_PREFIX       e.g. tfe-demo
+#   TFE_LICENSE_PATH    path to your .hclic file
+# =============================================================================
+
+set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+log()  { echo "[INFO]  $*"; }
+die()  { echo "[ERROR] $*" >&2; exit 1; }
+
+require() {
+  for cmd in "$@"; do
+    command -v "$cmd" &>/dev/null || die "'$cmd' not found — please install it first."
+  done
+}
+
+create_or_update_secret() {
+  local name="$1"
+  local description="$2"
+  local value_flag="$3"
+  local value="$4"
+
+  if aws secretsmanager describe-secret --secret-id "$name" \
+       --region "$AWS_REGION" &>/dev/null 2>&1; then
+    log "Secret '$name' already exists — updating value."
+    aws secretsmanager put-secret-value \
+      --secret-id "$name" \
+      --region "$AWS_REGION" \
+      "$value_flag" "$value" \
+      --output text --query 'ARN'
+  else
+    log "Creating secret '$name'."
+    aws secretsmanager create-secret \
+      --name "$name" \
+      --description "$description" \
+      --region "$AWS_REGION" \
+      "$value_flag" "$value" \
+      --output text --query 'ARN'
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# Preflight: required env vars
+# ---------------------------------------------------------------------------
+require aws openssl
+
+[[ -z "${TFE_DOMAIN:-}"       ]] && die "TFE_DOMAIN is not set."
+[[ -z "${AWS_REGION:-}"       ]] && die "AWS_REGION is not set."
+[[ -z "${SECRET_PREFIX:-}"    ]] && die "SECRET_PREFIX is not set."
+[[ -z "${TFE_LICENSE_PATH:-}" ]] && die "TFE_LICENSE_PATH is not set."
+[[ -f "$TFE_LICENSE_PATH"     ]] || die "TFE_LICENSE_PATH file not found: $TFE_LICENSE_PATH"
+
+TFE_LICENSE_CONTENT="$(cat "$TFE_LICENSE_PATH")"
+
+TMPDIR_WORK="$(mktemp -d)"
+trap 'rm -rf "$TMPDIR_WORK"' EXIT
+
+log "Domain:        $TFE_DOMAIN"
+log "AWS region:    $AWS_REGION"
+log "Secret prefix: $SECRET_PREFIX"
+log "License file:  $TFE_LICENSE_PATH"
+echo
+
+# ---------------------------------------------------------------------------
+# Generate passwords
+# ---------------------------------------------------------------------------
+ENCRYPTION_PASSWORD="$(openssl rand -base64 32 | tr -dc 'A-Za-z0-9' | head -c 32)"
+log "Generated encryption password."
+
+DB_PASSWORD="$(openssl rand -base64 24 | tr -dc 'A-Za-z0-9!#%^&*()-_' | head -c 24)"
+log "Generated database password."
+
+# ---------------------------------------------------------------------------
+# Self-signed CA + TLS cert + private key
+# ---------------------------------------------------------------------------
+CA_KEY="$TMPDIR_WORK/ca.key"
+CA_CERT="$TMPDIR_WORK/ca.crt"
+TLS_KEY="$TMPDIR_WORK/tfe.key"
+TLS_CSR="$TMPDIR_WORK/tfe.csr"
+TLS_CERT="$TMPDIR_WORK/tfe.crt"
+EXT_FILE="$TMPDIR_WORK/tfe.ext"
+
+log "Generating self-signed CA..."
+openssl genrsa -out "$CA_KEY" 4096 2>/dev/null
+openssl req -x509 -new -nodes \
+  -key "$CA_KEY" \
+  -sha256 -days 3650 \
+  -subj "/C=SG/O=HashiCorp Demo/CN=TFE Demo CA" \
+  -out "$CA_CERT" 2>/dev/null
+
+log "Generating TLS private key + CSR for $TFE_DOMAIN..."
+openssl genrsa -out "$TLS_KEY" 4096 2>/dev/null
+openssl req -new \
+  -key "$TLS_KEY" \
+  -subj "/C=SG/O=HashiCorp Demo/CN=${TFE_DOMAIN}" \
+  -out "$TLS_CSR" 2>/dev/null
+
+cat > "$EXT_FILE" <<EOF
+authorityKeyIdentifier=keyid,issuer
+basicConstraints=CA:FALSE
+keyUsage = digitalSignature, nonRepudiation, keyEncipherment, dataEncipherment
+subjectAltName = @alt_names
+
+[alt_names]
+DNS.1 = ${TFE_DOMAIN}
+EOF
+
+log "Signing TLS cert with the demo CA..."
+openssl x509 -req \
+  -in "$TLS_CSR" \
+  -CA "$CA_CERT" \
+  -CAkey "$CA_KEY" \
+  -CAcreateserial \
+  -out "$TLS_CERT" \
+  -days 825 \
+  -sha256 \
+  -extfile "$EXT_FILE" 2>/dev/null
+
+log "Verifying cert chain..."
+openssl verify -CAfile "$CA_CERT" "$TLS_CERT" >/dev/null
+
+# ---------------------------------------------------------------------------
+# base64-encode the PEM files (single line, no line wrapping)
+# The HVD module expects base64-encoded strings, not raw PEM.
+# ---------------------------------------------------------------------------
+TLS_CERT_B64="$(base64 < "$TLS_CERT" | tr -d '\n')"
+TLS_KEY_B64="$(base64 < "$TLS_KEY"   | tr -d '\n')"
+CA_BUNDLE_B64="$(base64 < "$CA_CERT" | tr -d '\n')"
+
+# ---------------------------------------------------------------------------
+# Push to Secrets Manager
+# ---------------------------------------------------------------------------
+echo
+log "=== Creating / updating Secrets Manager secrets ==="
+echo
+
+# License — raw plaintext (not base64)
+ARN_LICENSE="$(create_or_update_secret \
+  "${SECRET_PREFIX}/tfe-license" \
+  "TFE license (.hclic contents)" \
+  "--secret-string" "$TFE_LICENSE_CONTENT")"
+log "tfe_license_secret_arn             = $ARN_LICENSE"
+
+# Encryption password — raw plaintext (not base64)
+ARN_ENC_PW="$(create_or_update_secret \
+  "${SECRET_PREFIX}/tfe-encryption-password" \
+  "TFE encryption password" \
+  "--secret-string" "$ENCRYPTION_PASSWORD")"
+log "tfe_encryption_password_secret_arn = $ARN_ENC_PW"
+
+# Database password — raw plaintext (not base64)
+ARN_DB_PW="$(create_or_update_secret \
+  "${SECRET_PREFIX}/tfe-database-password" \
+  "TFE RDS database password" \
+  "--secret-string" "$DB_PASSWORD")"
+log "tfe_database_password_secret_arn   = $ARN_DB_PW"
+
+# TLS cert — base64-encoded PEM
+ARN_TLS_CERT="$(create_or_update_secret \
+  "${SECRET_PREFIX}/tfe-tls-cert" \
+  "TFE TLS certificate (base64-encoded PEM)" \
+  "--secret-string" "$TLS_CERT_B64")"
+log "tfe_tls_cert_secret_arn            = $ARN_TLS_CERT"
+
+# TLS private key — base64-encoded PEM
+ARN_TLS_KEY="$(create_or_update_secret \
+  "${SECRET_PREFIX}/tfe-tls-privkey" \
+  "TFE TLS private key (base64-encoded PEM)" \
+  "--secret-string" "$TLS_KEY_B64")"
+log "tfe_tls_privkey_secret_arn         = $ARN_TLS_KEY"
+
+# CA bundle — base64-encoded PEM
+ARN_CA_BUNDLE="$(create_or_update_secret \
+  "${SECRET_PREFIX}/tfe-tls-ca-bundle" \
+  "TFE TLS CA bundle (base64-encoded PEM)" \
+  "--secret-string" "$CA_BUNDLE_B64")"
+log "tfe_tls_ca_bundle_secret_arn       = $ARN_CA_BUNDLE"
+
+echo
+log "Done. Retrieve ARNs from Secrets Manager or the log output above."
