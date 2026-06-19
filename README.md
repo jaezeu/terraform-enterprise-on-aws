@@ -1,4 +1,4 @@
-# tfe-hvd-aws
+# Terraform Enterprise on AWS EC2
 
 Terraform configuration for deploying HashiCorp Terraform Enterprise (TFE) on AWS using the [HVD (HashiCorp Validated Design) module](https://registry.terraform.io/modules/hashicorp/terraform-enterprise-hvd/aws/latest).
 
