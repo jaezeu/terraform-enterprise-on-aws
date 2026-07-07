@@ -20,19 +20,24 @@ module "tfe_hvd" {
   tfe_fqdn                           = var.tfe_fqdn
   route53_tfe_hosted_zone_name       = var.route53_tfe_hosted_zone_name
 
-  # Secrets Manager ARNs
-  tfe_license_secret_arn             = var.tfe_license_secret_arn
-  tfe_encryption_password_secret_arn = var.tfe_encryption_password_secret_arn
-  tfe_database_password_secret_arn   = var.tfe_database_password_secret_arn
-  tfe_tls_cert_secret_arn            = var.tfe_tls_cert_secret_arn
-  tfe_tls_privkey_secret_arn         = var.tfe_tls_privkey_secret_arn
-  tfe_tls_ca_bundle_secret_arn       = var.tfe_tls_ca_bundle_secret_arn
+  # Secrets Manager ARNs — resolved by name from var.secret_prefix (see data.tf)
+  tfe_license_secret_arn             = data.aws_secretsmanager_secret.tfe["license"].arn
+  tfe_encryption_password_secret_arn = data.aws_secretsmanager_secret.tfe["encryption_password"].arn
+  tfe_database_password_secret_arn   = data.aws_secretsmanager_secret.tfe["database_password"].arn
+  tfe_redis_password_secret_arn      = data.aws_secretsmanager_secret.tfe["redis_password"].arn
+  tfe_tls_cert_secret_arn            = data.aws_secretsmanager_secret.tfe["tls_cert"].arn
+  tfe_tls_privkey_secret_arn         = data.aws_secretsmanager_secret.tfe["tls_privkey"].arn
+  tfe_tls_ca_bundle_secret_arn       = data.aws_secretsmanager_secret.tfe["tls_ca_bundle"].arn
 
   #EC2
   ec2_allow_ssm = true
 
   #RDS
   rds_skip_final_snapshot = true #For testing purposes only. In production, you should set this to false and provide a final snapshot identifier.
+
+  #S3: allow destroy even when TFE has written objects (state/plan artifacts).
+  #For demo teardown only — in production keep false to protect state data.
+  s3_force_destroy = true
 }
 
 module "tfe_vpc" {
