@@ -1,8 +1,10 @@
-# Bootstrap
+# TFE Secrets Setup
 
-`bootstrap.sh` is a one-time setup script that generates self-signed TLS material and creates the six AWS Secrets Manager secrets required by the [terraform-aws-terraform-enterprise-hvd](https://github.com/hashicorp/terraform-aws-terraform-enterprise-hvd) module before a `terraform apply`.
+`create_tfe_secrets.sh` is a one-time setup script that generates self-signed TLS material and creates the six AWS Secrets Manager secrets required by the [terraform-aws-terraform-enterprise-hvd](https://github.com/hashicorp/terraform-aws-terraform-enterprise-hvd) module before a `terraform apply`.
 
-> ⚠️ Do not re-run this against a live TFE deployment. It will rotate the encryption and database passwords in Secrets Manager without updating the running instance or RDS, which will break TFE.
+Secrets that already exist are skipped (their existing ARN is printed), so re-running the script is safe. To overwrite existing secrets with newly generated values, pass `--rotate` — the script asks for confirmation first.
+
+> ⚠️ Do not use `--rotate` against a live TFE deployment. It rotates the encryption and database passwords in Secrets Manager without updating the running instance or RDS, which will break TFE.
 
 ## Prerequisites
 
@@ -26,10 +28,13 @@ export AWS_REGION="ap-southeast-1"
 export SECRET_PREFIX="tfe-demo"
 export TFE_LICENSE_PATH="/path/to/terraform.hclic"
 
-./scripts/bootstrap.sh
+./scripts/create_tfe_secrets.sh
+
+# To overwrite existing secrets (e.g. before a fresh deployment):
+./scripts/create_tfe_secrets.sh --rotate
 ```
 
-The ARN for each secret is printed as it is created. Use these values to populate the following variables in your `terraform.tfvars`:
+The ARN for each secret is printed as it is created (or skipped). Use these values to populate the following variables in your `terraform.tfvars`:
 
 ```hcl
 tfe_license_secret_arn             = "..."

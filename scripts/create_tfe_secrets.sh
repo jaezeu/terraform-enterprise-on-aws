@@ -4,6 +4,11 @@
 # Creates all 6 Secrets Manager secrets required by terraform-aws-terraform-
 # enterprise-hvd. Generates a self-signed CA + TLS cert for the given domain.
 #
+# Secrets that already exist are left untouched by default, so re-running is
+# safe. Pass --rotate to overwrite existing values — do NOT do this against a
+# live TFE deployment: it rotates the encryption and database passwords
+# without updating the running instance or RDS, which will break TFE.
+#
 # Prerequisites:
 #   - aws cli (configured with appropriate credentials/profile)
 #   - openssl
@@ -13,6 +18,9 @@
 #   AWS_REGION          e.g. ap-southeast-1
 #   SECRET_PREFIX       e.g. tfe-demo
 #   TFE_LICENSE_PATH    path to your .hclic file
+#
+# Usage:
+#   ./create_tfe_secrets.sh [--rotate]
 # =============================================================================
 
 set -euo pipefail
@@ -20,7 +28,9 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-log()  { echo "[INFO]  $*"; }
+# Logs go to stderr so ARNs captured via $(create_or_update_secret ...) on
+# stdout stay clean.
+log()  { echo "[INFO]  $*" >&2; }
 die()  { echo "[ERROR] $*" >&2; exit 1; }
 
 require() {
@@ -37,12 +47,20 @@ create_or_update_secret() {
 
   if aws secretsmanager describe-secret --secret-id "$name" \
        --region "$AWS_REGION" &>/dev/null 2>&1; then
-    log "Secret '$name' already exists — updating value."
-    aws secretsmanager put-secret-value \
-      --secret-id "$name" \
-      --region "$AWS_REGION" \
-      "$value_flag" "$value" \
-      --output text --query 'ARN'
+    if [[ "$ROTATE" == "true" ]]; then
+      log "Secret '$name' already exists — rotating value (--rotate)."
+      aws secretsmanager put-secret-value \
+        --secret-id "$name" \
+        --region "$AWS_REGION" \
+        "$value_flag" "$value" \
+        --output text --query 'ARN'
+    else
+      log "Secret '$name' already exists — skipping (pass --rotate to overwrite)."
+      aws secretsmanager describe-secret \
+        --secret-id "$name" \
+        --region "$AWS_REGION" \
+        --output text --query 'ARN'
+    fi
   else
     log "Creating secret '$name'."
     aws secretsmanager create-secret \
@@ -53,6 +71,25 @@ create_or_update_secret() {
       --output text --query 'ARN'
   fi
 }
+
+# ---------------------------------------------------------------------------
+# Arguments
+# ---------------------------------------------------------------------------
+ROTATE=false
+for arg in "$@"; do
+  case "$arg" in
+    --rotate) ROTATE=true ;;
+    *) die "Unknown argument: '$arg' (usage: $0 [--rotate])" ;;
+  esac
+done
+
+if [[ "$ROTATE" == "true" ]]; then
+  log "--rotate: existing secrets WILL be overwritten with new values."
+  log "Do NOT do this against a live TFE deployment — rotating the encryption"
+  log "and database passwords without updating TFE/RDS will break it."
+  read -r -p "Type 'rotate' to continue: " confirm
+  [[ "$confirm" == "rotate" ]] || die "Aborted."
+fi
 
 # ---------------------------------------------------------------------------
 # Preflight: required env vars
