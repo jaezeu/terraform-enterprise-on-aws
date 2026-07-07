@@ -1,10 +1,15 @@
 # TFE Secrets Setup
 
-`create_tfe_secrets.sh` is a one-time setup script that generates self-signed TLS material and creates the six AWS Secrets Manager secrets required by the [terraform-aws-terraform-enterprise-hvd](https://github.com/hashicorp/terraform-aws-terraform-enterprise-hvd) module before a `terraform apply`.
+`create_tfe_secrets.sh` is a one-time setup script that generates self-signed TLS material and creates the AWS Secrets Manager secrets required by the TFE HVD modules before a `terraform apply`. It serves both deployments in this repo:
+
+- **EC2** ([`../ec2/`](../ec2/)) uses the license, encryption password, database password, and TLS secrets.
+- **EKS** ([`../eks/`](../eks/)) uses the database password and the Redis password. The remaining TFE secrets (license, TLS, encryption password) are supplied to the Helm chart at install time, not to the Terraform module.
+
+Running the script once creates the full superset, so both deployments are covered.
 
 Secrets that already exist are skipped (their existing ARN is printed), so re-running the script is safe. To overwrite existing secrets with newly generated values, pass `--rotate` — the script asks for confirmation first.
 
-> ⚠️ Do not use `--rotate` against a live TFE deployment. It rotates the encryption and database passwords in Secrets Manager without updating the running instance or RDS, which will break TFE.
+> ⚠️ Do not use `--rotate` against a live TFE deployment. It rotates the encryption, database, and Redis passwords in Secrets Manager. The encryption and database passwords are not re-read by a running instance/RDS, so rotating them breaks TFE. The Redis password is only disruptive where it is wired in (EKS always; EC2 only if `tfe_redis_password_secret_arn` is set) and requires a follow-up `terraform apply` to stay in sync.
 
 ## Prerequisites
 
@@ -15,7 +20,7 @@ Secrets that already exist are skipped (their existing ARN is printed), so re-ru
 
 | Variable | Description |
 |---|---|
-| `TFE_DOMAIN` | FQDN for the TFE instance (e.g. `tfe.example.com`) |
+| `TFE_HOSTED_ZONE` | Route 53 hosted zone the wildcard cert covers (e.g. `example.com`). The cert is issued for `*.<zone>` and `<zone>`, so it serves every TFE subdomain (EC2 and EKS) under it |
 | `AWS_REGION` | AWS region to create the secrets in |
 | `SECRET_PREFIX` | Prefix for secret names (e.g. `tfe-demo`) |
 | `TFE_LICENSE_PATH` | Path to your TFE license file (`.hclic`) |
@@ -23,7 +28,7 @@ Secrets that already exist are skipped (their existing ARN is printed), so re-ru
 ## Usage
 
 ```bash
-export TFE_DOMAIN="tfe-demo.example.com"
+export TFE_HOSTED_ZONE="example.com"
 export AWS_REGION="ap-southeast-1"
 export SECRET_PREFIX="tfe-demo"
 export TFE_LICENSE_PATH="/path/to/terraform.hclic"
@@ -34,16 +39,7 @@ export TFE_LICENSE_PATH="/path/to/terraform.hclic"
 ./scripts/create_tfe_secrets.sh --rotate
 ```
 
-The ARN for each secret is printed as it is created (or skipped). Use these values to populate the following variables in your `terraform.tfvars`:
-
-```hcl
-tfe_license_secret_arn             = "..."
-tfe_encryption_password_secret_arn = "..."
-tfe_database_password_secret_arn   = "..."
-tfe_tls_cert_secret_arn            = "..."
-tfe_tls_privkey_secret_arn         = "..."
-tfe_tls_ca_bundle_secret_arn       = "..."
-```
+The ARN for each secret is printed as it is created (or skipped). You do **not** need to copy these ARNs anywhere: both the `ec2/` and `eks/` configs resolve them by name via `data.aws_secretsmanager_secret` from the `secret_prefix` variable (default `tfe-demo`, matching `SECRET_PREFIX` here). Just keep `SECRET_PREFIX` and `secret_prefix` in sync, and ensure the workspace run role has `secretsmanager:DescribeSecret` and `secretsmanager:GetSecretValue` on `<prefix>/*` (see the root README's IAM notes for which layer reads what).
 
 ## What gets created
 
@@ -52,8 +48,9 @@ tfe_tls_ca_bundle_secret_arn       = "..."
 | `tfe-license` | Plaintext | Raw `.hclic` file contents |
 | `tfe-encryption-password` | Plaintext | Randomly generated 32-char password |
 | `tfe-database-password` | Plaintext | Randomly generated 24-char password |
+| `tfe-redis-password` | Plaintext | Randomly generated 24-char password (EKS only) |
 | `tfe-tls-cert` | Plaintext (base64) | Self-signed TLS certificate (PEM) |
 | `tfe-tls-privkey` | Plaintext (base64) | TLS private key (PEM) |
 | `tfe-tls-ca-bundle` | Plaintext (base64) | Self-signed CA certificate (PEM) |
 
-TLS secrets are base64-encoded as required by the HVD module.
+TLS secrets are base64-encoded as required by the HVD module. The `tfe-redis-password` secret is **required** by the EKS deployment and **optional** for EC2 — the EC2 HVD module manages the Redis password internally when `tfe_redis_password_secret_arn` is left unset, so it is created here mainly for EKS.

@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # =============================================================================
 # create_tfe_secrets.sh
-# Creates all 6 Secrets Manager secrets required by terraform-aws-terraform-
-# enterprise-hvd. Generates a self-signed CA + TLS cert for the given domain.
+# Creates the Secrets Manager secrets required by the TFE HVD modules. Generates
+# a self-signed CA + a wildcard TLS cert for the hosted zone, so a single cert
+# serves every TFE subdomain under it (e.g. tfe-demo.<zone> and
+# tfe-eks-demo.<zone> from the EC2 and EKS deployments).
 #
 # Secrets that already exist are left untouched by default, so re-running is
 # safe. Pass --rotate to overwrite existing values — do NOT do this against a
@@ -14,7 +16,8 @@
 #   - openssl
 #
 # Required env vars:
-#   TFE_DOMAIN          e.g. tfe-demo.example.com
+#   TFE_HOSTED_ZONE     Route53 hosted zone the cert covers, e.g. example.com
+#                       (the cert is issued for *.<zone> and <zone>)
 #   AWS_REGION          e.g. ap-southeast-1
 #   SECRET_PREFIX       e.g. tfe-demo
 #   TFE_LICENSE_PATH    path to your .hclic file
@@ -96,7 +99,7 @@ fi
 # ---------------------------------------------------------------------------
 require aws openssl
 
-[[ -z "${TFE_DOMAIN:-}"       ]] && die "TFE_DOMAIN is not set."
+[[ -z "${TFE_HOSTED_ZONE:-}"  ]] && die "TFE_HOSTED_ZONE is not set."
 [[ -z "${AWS_REGION:-}"       ]] && die "AWS_REGION is not set."
 [[ -z "${SECRET_PREFIX:-}"    ]] && die "SECRET_PREFIX is not set."
 [[ -z "${TFE_LICENSE_PATH:-}" ]] && die "TFE_LICENSE_PATH is not set."
@@ -104,10 +107,14 @@ require aws openssl
 
 TFE_LICENSE_CONTENT="$(cat "$TFE_LICENSE_PATH")"
 
+# Wildcard cert covers every single-label subdomain under the zone.
+WILDCARD_DOMAIN="*.${TFE_HOSTED_ZONE}"
+
 TMPDIR_WORK="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR_WORK"' EXIT
 
-log "Domain:        $TFE_DOMAIN"
+log "Hosted zone:   $TFE_HOSTED_ZONE"
+log "Cert domains:  $WILDCARD_DOMAIN, $TFE_HOSTED_ZONE"
 log "AWS region:    $AWS_REGION"
 log "Secret prefix: $SECRET_PREFIX"
 log "License file:  $TFE_LICENSE_PATH"
@@ -119,8 +126,13 @@ echo
 ENCRYPTION_PASSWORD="$(openssl rand -base64 32 | tr -dc 'A-Za-z0-9' | head -c 32)"
 log "Generated encryption password."
 
-DB_PASSWORD="$(openssl rand -base64 24 | tr -dc 'A-Za-z0-9!#%^&*()-_' | head -c 24)"
+DB_PASSWORD="$(openssl rand -base64 24 | tr -dc 'A-Za-z0-9!#%^&*()_-' | head -c 24)"
 log "Generated database password."
+
+# Redis password — used by the EKS deployment only. The EKS HVD module requires
+# 16-128 alphanumeric characters or symbols, excluding @, " and /.
+REDIS_PASSWORD="$(openssl rand -base64 24 | tr -dc 'A-Za-z0-9!#%^&*()_-' | head -c 24)"
+log "Generated Redis password."
 
 # ---------------------------------------------------------------------------
 # Self-signed CA + TLS cert + private key
@@ -140,13 +152,14 @@ openssl req -x509 -new -nodes \
   -subj "/C=SG/O=HashiCorp Demo/CN=TFE Demo CA" \
   -out "$CA_CERT" 2>/dev/null
 
-log "Generating TLS private key + CSR for $TFE_DOMAIN..."
+log "Generating TLS private key + CSR for $WILDCARD_DOMAIN..."
 openssl genrsa -out "$TLS_KEY" 4096 2>/dev/null
 openssl req -new \
   -key "$TLS_KEY" \
-  -subj "/C=SG/O=HashiCorp Demo/CN=${TFE_DOMAIN}" \
+  -subj "/C=SG/O=HashiCorp Demo/CN=${WILDCARD_DOMAIN}" \
   -out "$TLS_CSR" 2>/dev/null
 
+# SAN covers the wildcard (any single-label subdomain) plus the bare apex.
 cat > "$EXT_FILE" <<EOF
 authorityKeyIdentifier=keyid,issuer
 basicConstraints=CA:FALSE
@@ -154,7 +167,8 @@ keyUsage = digitalSignature, nonRepudiation, keyEncipherment, dataEncipherment
 subjectAltName = @alt_names
 
 [alt_names]
-DNS.1 = ${TFE_DOMAIN}
+DNS.1 = ${WILDCARD_DOMAIN}
+DNS.2 = ${TFE_HOSTED_ZONE}
 EOF
 
 log "Signing TLS cert with the demo CA..."
@@ -206,6 +220,13 @@ ARN_DB_PW="$(create_or_update_secret \
   "TFE RDS database password" \
   "--secret-string" "$DB_PASSWORD")"
 log "tfe_database_password_secret_arn   = $ARN_DB_PW"
+
+# Redis password — raw plaintext (not base64). EKS deployment only.
+ARN_REDIS_PW="$(create_or_update_secret \
+  "${SECRET_PREFIX}/tfe-redis-password" \
+  "TFE Redis password (EKS deployment)" \
+  "--secret-string" "$REDIS_PASSWORD")"
+log "tfe_redis_password_secret_arn      = $ARN_REDIS_PW"
 
 # TLS cert — base64-encoded PEM
 ARN_TLS_CERT="$(create_or_update_secret \
