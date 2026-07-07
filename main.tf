@@ -28,6 +28,9 @@ module "tfe_hvd" {
   tfe_tls_privkey_secret_arn         = var.tfe_tls_privkey_secret_arn
   tfe_tls_ca_bundle_secret_arn       = var.tfe_tls_ca_bundle_secret_arn
 
+  #EC2
+  ec2_allow_ssm = true
+
   #RDS
   rds_skip_final_snapshot = true #For testing purposes only. In production, you should set this to false and provide a final snapshot identifier.
 }
