@@ -1,0 +1,53 @@
+# Static checks only — deploys stay local/HCP-TF-driven on purpose: the
+# sandbox SCP denies creating a GitHub OIDC provider (no keyless AWS auth from
+# runners), and the cluster layers hinge on local install-dir artifacts.
+# See openshift/deploy.sh for the one-command deploy.
+name: Checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        dir:
+          - ec2
+          - eks/infra
+          - eks/addons
+          - eks/tfe
+          - openshift/cluster
+          - openshift/config
+          - openshift/tfe
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_wrapper: false
+
+      - name: terraform fmt
+        run: terraform fmt -check -diff
+        working-directory: ${{ matrix.dir }}
+
+      # -backend=false skips the HCP Terraform cloud block (no token in CI).
+      - name: terraform validate
+        run: |
+          terraform init -backend=false -input=false
+          terraform validate
+        working-directory: ${{ matrix.dir }}
+
+  shell:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: shellcheck
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          # error severity only: fail on real breakage, not style nits
+          shellcheck -S error scripts/*.sh openshift/*.sh openshift/scripts/*.sh
