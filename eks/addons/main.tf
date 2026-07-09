@@ -1,11 +1,7 @@
-# =============================================================================
 # Layer 2: cluster addons — AWS Load Balancer Controller and external-dns.
-# Applied after infra. Both use IRSA roles created by the infra layer.
-# =============================================================================
+# Applied after infra; both use IRSA roles created by the infra layer.
 
-locals {
-  infra = data.terraform_remote_state.infra.outputs
-}
+# local.infra: see data.tf
 
 # Provisions the NLB when the TFE Service (tfe layer) is created.
 resource "helm_release" "aws_lb_controller" {
@@ -31,11 +27,8 @@ resource "helm_release" "aws_lb_controller" {
   })]
 }
 
-# Watches Services/Ingresses and manages Route 53 records from their
-# external-dns.alpha.kubernetes.io/hostname annotations. This replaces a
-# Terraform-managed DNS record: when the TFE Service gets its NLB hostname,
-# external-dns creates the record — and keeps it correct if the NLB is ever
-# recreated.
+# Manages Route 53 records from Services' hostname annotations — replaces a
+# Terraform DNS record and keeps it correct if the NLB is ever recreated.
 resource "helm_release" "external_dns" {
   name             = "external-dns"
   repository       = "https://kubernetes-sigs.github.io/external-dns/"

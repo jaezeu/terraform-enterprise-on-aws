@@ -28,16 +28,18 @@ provider "aws" {
 
 # Authenticates to the infra-layer cluster as the HCP TF OIDC run role, which
 # the HVD module granted AmazonEKSClusterAdminPolicy via an EKS access entry.
+# try(): the data sources are absent once the cluster is destroyed (see
+# data.tf) — the placeholders keep destroy plans working then.
 provider "kubernetes" {
-  host                   = data.aws_eks_cluster.tfe.endpoint
-  cluster_ca_certificate = base64decode(data.aws_eks_cluster.tfe.certificate_authority[0].data)
-  token                  = data.aws_eks_cluster_auth.tfe.token
+  host                   = try(data.aws_eks_cluster.tfe[0].endpoint, "https://cluster-gone.invalid")
+  cluster_ca_certificate = try(base64decode(data.aws_eks_cluster.tfe[0].certificate_authority[0].data), "")
+  token                  = try(data.aws_eks_cluster_auth.tfe[0].token, "")
 }
 
 provider "helm" {
   kubernetes = {
-    host                   = data.aws_eks_cluster.tfe.endpoint
-    cluster_ca_certificate = base64decode(data.aws_eks_cluster.tfe.certificate_authority[0].data)
-    token                  = data.aws_eks_cluster_auth.tfe.token
+    host                   = try(data.aws_eks_cluster.tfe[0].endpoint, "https://cluster-gone.invalid")
+    cluster_ca_certificate = try(base64decode(data.aws_eks_cluster.tfe[0].certificate_authority[0].data), "")
+    token                  = try(data.aws_eks_cluster_auth.tfe[0].token, "")
   }
 }

@@ -39,15 +39,11 @@ module "tfe_eks" {
   tfe_database_password_secret_arn = data.aws_secretsmanager_secret.tfe["database_password"].arn
   tfe_redis_password_secret_arn    = data.aws_secretsmanager_secret.tfe["redis_password"].arn
 
-  # No helm overrides file: the tfe layer builds chart values from this
-  # workspace's outputs instead.
+  # The tfe layer builds chart values from this workspace's outputs instead
   create_helm_overrides_file = false
 
-  # RDS
-  rds_skip_final_snapshot = true # For testing purposes only. In production, set this to false.
-
-  # S3: allow destroy even when TFE has written objects (state/plan artifacts).
-  # For demo teardown only — in production keep false to protect state data.
+  # Demo teardown settings — keep both false in production (protects state data)
+  rds_skip_final_snapshot = true
   force_destroy_s3_bucket = true
 }
 

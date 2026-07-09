@@ -1,15 +1,10 @@
-# =============================================================================
 # Layer 3: TFE application — Kubernetes secrets + the terraform-enterprise
-# Helm chart. Applied after addons. Chart values mirror the HVD module's
-# templates/helm_overrides_values.yaml.tpl, populated from infra outputs.
-#
-# DNS is handled by external-dns (addons layer): the hostname annotation on
-# the Service below causes the Route 53 record to be created as soon as the
-# AWS LB Controller provisions the NLB — no Terraform DNS resource needed.
-# =============================================================================
+# Helm chart, applied after addons. Values mirror the HVD module's
+# helm_overrides template, populated from infra outputs. DNS comes from
+# external-dns (addons layer) via the Service's hostname annotation.
 
 locals {
-  infra = data.terraform_remote_state.infra.outputs
+  # local.infra: see data.tf
 
   # Must match the HVD module defaults (tfe_kube_namespace /
   # tfe_kube_svc_account) — the TFE IRSA trust policy is bound to this pair.
@@ -90,8 +85,7 @@ resource "helm_release" "terraform_enterprise" {
   chart      = "terraform-enterprise"
   namespace  = kubernetes_namespace_v1.tfe.metadata[0].name
 
-  # Wait for pods ready and the LoadBalancer Service to get its NLB hostname.
-  # First boot runs database migrations, so give it ample time.
+  # first TFE boot runs database migrations — give the wait ample time
   wait    = true
   timeout = 1800
 
@@ -119,35 +113,22 @@ resource "helm_release" "terraform_enterprise" {
       }
     }
 
-    tfe = {
-      privateHttpPort  = 8080
-      privateHttpsPort = 8443
-      metrics = {
-        enable    = false
-        httpPort  = 9090
-        httpsPort = 9091
-      }
-    }
-
     service = {
       type = "LoadBalancer"
       port = 443
       annotations = {
         # external-dns (addons layer) creates the Route 53 record for this
-        # hostname once the NLB is provisioned.
         "external-dns.alpha.kubernetes.io/hostname" = local.infra.tfe_fqdn
 
-        # "external" + IP targets is the current form of the deprecated
-        # "nlb-ip" the HVD module's template still uses.
+        # "external" + "ip" = current form of the deprecated "nlb-ip"
         "service.beta.kubernetes.io/aws-load-balancer-type"                 = "external"
         "service.beta.kubernetes.io/aws-load-balancer-nlb-target-type"      = "ip"
         "service.beta.kubernetes.io/aws-load-balancer-scheme"               = "internet-facing"
         "service.beta.kubernetes.io/aws-load-balancer-subnets"              = join(",", local.infra.public_subnet_ids)
         "service.beta.kubernetes.io/aws-load-balancer-security-groups"      = local.infra.tfe_lb_security_group_id
         "service.beta.kubernetes.io/aws-load-balancer-healthcheck-protocol" = "https"
-        # TFE v202505-1 serves /_health_check; /api/v1/health/readiness (per the
-        # HVD module template) only exists on newer TFE releases — verified 404
-        # on this version. Switch back when bumping tfe_image_tag.
+        # TFE v202505-1 serves /_health_check (the HVD template's newer path
+        # 404s on this version) — revisit when bumping tfe_image_tag
         "service.beta.kubernetes.io/aws-load-balancer-healthcheck-path" = "/_health_check"
         "service.beta.kubernetes.io/aws-load-balancer-healthcheck-port" = "8443"
       }
@@ -165,13 +146,12 @@ resource "helm_release" "terraform_enterprise" {
         TFE_DATABASE_USER       = "tfe"
         TFE_DATABASE_PARAMETERS = "sslmode=require"
 
-        # Object storage (S3 via IRSA; module uses AES256 when no KMS CMK is set)
-        TFE_OBJECT_STORAGE_TYPE                                 = "s3"
-        TFE_OBJECT_STORAGE_S3_BUCKET                            = local.infra.s3_bucket_name
-        TFE_OBJECT_STORAGE_S3_REGION                            = data.aws_region.current.region
-        TFE_OBJECT_STORAGE_S3_USE_INSTANCE_PROFILE              = true
-        TFE_OBJECT_STORAGE_S3_SERVER_SIDE_ENCRYPTION            = "AES256"
-        TFE_OBJECT_STORAGE_S3_SERVER_SIDE_ENCRYPTION_KMS_KEY_ID = ""
+        # Object storage (S3 via IRSA)
+        TFE_OBJECT_STORAGE_TYPE                      = "s3"
+        TFE_OBJECT_STORAGE_S3_BUCKET                 = local.infra.s3_bucket_name
+        TFE_OBJECT_STORAGE_S3_REGION                 = data.aws_region.current.region
+        TFE_OBJECT_STORAGE_S3_USE_INSTANCE_PROFILE   = true
+        TFE_OBJECT_STORAGE_S3_SERVER_SIDE_ENCRYPTION = "AES256"
 
         # Redis (auth + TLS enabled by the module config)
         TFE_REDIS_HOST     = local.infra.redis_primary_endpoint

@@ -13,6 +13,24 @@ data "terraform_remote_state" "infra" {
 
 data "aws_region" "current" {}
 
+# try(): if the infra workspace was already destroyed its outputs are gone,
+# but this layer must still be able to plan its own destroy (deletes use
+# values recorded in state, not these expressions).
+locals {
+  infra_outputs = data.terraform_remote_state.infra.outputs
+  infra_exists  = can(local.infra_outputs.eks_cluster_name)
+  infra = {
+    eks_cluster_name         = try(local.infra_outputs.eks_cluster_name, "unused")
+    tfe_fqdn                 = try(local.infra_outputs.tfe_fqdn, "unused")
+    tfe_irsa_role_arn        = try(local.infra_outputs.tfe_irsa_role_arn, "unused")
+    public_subnet_ids        = try(local.infra_outputs.public_subnet_ids, [])
+    tfe_lb_security_group_id = try(local.infra_outputs.tfe_lb_security_group_id, "unused")
+    tfe_database_host        = try(local.infra_outputs.tfe_database_host, "unused")
+    s3_bucket_name           = try(local.infra_outputs.s3_bucket_name, "unused")
+    redis_primary_endpoint   = try(local.infra_outputs.redis_primary_endpoint, "unused")
+  }
+}
+
 # Secret VALUES consumed by the Helm install (kubernetes secrets + CA bundle).
 # The run role needs secretsmanager:GetSecretValue on <secret_prefix>/*.
 locals {
@@ -32,10 +50,15 @@ data "aws_secretsmanager_secret_version" "tfe" {
   secret_id = "${var.secret_prefix}/${each.value}"
 }
 
+# count-gated: these lookups fail hard when the cluster is gone, so skip them
+# entirely once the infra workspace no longer exports it (the providers fall
+# back to placeholder endpoints — see provider.tf).
 data "aws_eks_cluster" "tfe" {
-  name = data.terraform_remote_state.infra.outputs.eks_cluster_name
+  count = local.infra_exists ? 1 : 0
+  name  = local.infra.eks_cluster_name
 }
 
 data "aws_eks_cluster_auth" "tfe" {
-  name = data.terraform_remote_state.infra.outputs.eks_cluster_name
+  count = local.infra_exists ? 1 : 0
+  name  = local.infra.eks_cluster_name
 }
