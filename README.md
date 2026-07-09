@@ -1,4 +1,4 @@
-# terraform-enterprise-on-aws
+# Terraform Enterprise on AWS
 
 Terraform configurations for deploying HashiCorp Terraform Enterprise (TFE) on AWS three ways — EC2 and EKS via the [HashiCorp Validated Design (HVD)](https://developer.hashicorp.com/validated-designs) modules, plus a hand-built OpenShift UPI install. Three independent deployments of the same product, side by side, in the same AWS account — used for learning and demos.
 
