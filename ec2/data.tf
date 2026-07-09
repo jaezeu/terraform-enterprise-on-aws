@@ -2,11 +2,9 @@ data "aws_availability_zones" "available" {
   state = "available"
 }
 
-# Resolve the TFE secret ARNs by name from the shared `secret_prefix`, so the
-# workspace never has to hold hardcoded ARNs. Names match those created by
-# scripts/create_tfe_secrets.sh. Only metadata is read here (the ARN) — the
-# secret values are read at instance boot via the EC2 instance profile — so the
-# run role needs only secretsmanager:DescribeSecret on these.
+# Resolve secret ARNs by name (created by scripts/create_tfe_secrets.sh) —
+# no hardcoded ARNs. Metadata only: values are read at instance boot via the
+# instance profile, so the run role needs just secretsmanager:DescribeSecret.
 locals {
   tfe_secret_names = {
     license             = "tfe-license"

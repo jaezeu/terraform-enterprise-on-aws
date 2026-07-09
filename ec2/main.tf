@@ -29,15 +29,12 @@ module "tfe_hvd" {
   tfe_tls_privkey_secret_arn         = data.aws_secretsmanager_secret.tfe["tls_privkey"].arn
   tfe_tls_ca_bundle_secret_arn       = data.aws_secretsmanager_secret.tfe["tls_ca_bundle"].arn
 
-  #EC2
+  # EC2
   ec2_allow_ssm = true
 
-  #RDS
-  rds_skip_final_snapshot = true #For testing purposes only. In production, you should set this to false and provide a final snapshot identifier.
-
-  #S3: allow destroy even when TFE has written objects (state/plan artifacts).
-  #For demo teardown only — in production keep false to protect state data.
-  s3_force_destroy = true
+  # Demo teardown settings — keep both false in production (protects state data)
+  rds_skip_final_snapshot = true
+  s3_force_destroy        = true
 }
 
 module "tfe_vpc" {

@@ -4,6 +4,8 @@ Deploys HashiCorp Terraform Enterprise (TFE) on AWS EC2 using the [terraform-ent
 
 State is managed remotely via HCP Terraform (`jaz-hashi` org, workspace `tfe-hvd-aws-dev`).
 
+**Why a single workspace** (vs the three-layer split in `eks/` and `openshift/`): everything here is plain AWS infrastructure with no Kubernetes provider in the loop — the HVD module boots TFE via instance user-data, and DNS/TLS/secrets are all resolvable at plan time. There is no "depends on the running cluster" middle layer to isolate, so one state and one apply is the simplest correct shape. The layered setups exist precisely because *their* app layers talk to a cluster that must already exist.
+
 ---
 
 ## Overview
