@@ -1,0 +1,35 @@
+# Rendered by bootstrap.sh — placeholders: __BASE_DOMAIN__, __CLUSTER_NAME__,
+# __REGION__, __PULL_SECRET__, __SSH_KEY__. Contains no secrets as committed.
+#
+# platform.aws + publish External: the installer generates ignition/manifests
+# with AWS cloud integration enabled; all infrastructure is provisioned by the
+# Terraform in cluster/ (UPI), not by the installer.
+apiVersion: v1
+baseDomain: __BASE_DOMAIN__
+# Manual: cloud credentials are per-operator IAM ROLES (defined by ccoctl,
+# created by cluster/identity.tf) assumed from the node instance-profile
+# roles via IMDS — no OIDC provider, no IAM users (see README).
+credentialsMode: Manual
+metadata:
+  name: __CLUSTER_NAME__
+compute:
+- name: worker
+  replicas: 0   # UPI: workers are created by Terraform, not MachineSets, at install time
+controlPlane:
+  name: master
+  replicas: 3
+networking:
+  clusterNetwork:
+  - cidr: 10.128.0.0/14
+    hostPrefix: 23
+  machineNetwork:
+  - cidr: 10.10.0.0/16
+  networkType: OVNKubernetes
+  serviceNetwork:
+  - 172.30.0.0/16
+platform:
+  aws:
+    region: __REGION__
+publish: External
+pullSecret: '__PULL_SECRET__'
+sshKey: '__SSH_KEY__'

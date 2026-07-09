@@ -1,0 +1,3 @@
+# HCP TF uploads this directory on every CLI-driven run. Guard against an
+# installer working directory ever landing here (it holds cluster secrets).
+install-dir/

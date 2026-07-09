@@ -1,0 +1,3 @@
+# Generated per-cluster by scripts/bootstrap.sh
+cluster.auto.tfvars.json
+ccoctl-generated/

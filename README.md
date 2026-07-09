@@ -6,6 +6,7 @@ Terraform configurations for deploying HashiCorp Terraform Enterprise (TFE) on A
 |---|---|---|---|
 | TFE on **EC2** | [`ec2/`](ec2/) | [terraform-enterprise-hvd/aws](https://registry.terraform.io/modules/hashicorp/terraform-enterprise-hvd/aws/latest) | `tfe-hvd-aws-dev` |
 | TFE on **EKS** | [`eks/`](eks/) | [terraform-enterprise-eks-hvd/aws](https://registry.terraform.io/modules/hashicorp/terraform-enterprise-eks-hvd/aws/latest) | `tfe-hvd-eks-infra` → `-addons` → `-tfe` |
+| TFE on **OpenShift (UPI)** | [`openshift/`](openshift/) | hand-built from the official [UPI templates](https://github.com/openshift/installer/tree/master/upi/aws/cloudformation) | `tfe-hvd-ocp-cluster` → `-config` (→ `-tfe`, next) |
 
 Every directory is a self-contained, CLI-driven root module with its own HCP Terraform workspace (all in the `jaz-hashi` org, Default Project) and its own state. See the per-deployment READMEs:
 
@@ -23,6 +24,10 @@ Every directory is a self-contained, CLI-driven root module with its own HCP Ter
 │   ├── infra/     #   1. tfe-hvd-eks-infra  (VPC, EKS, Aurora, Redis, S3, IRSA)
 │   ├── addons/    #   2. tfe-hvd-eks-addons (AWS LB Controller, external-dns)
 │   └── tfe/       #   3. tfe-hvd-eks-tfe    (k8s secrets, TFE Helm chart)
+├── openshift/     # OpenShift 4 UPI on AWS + TFE (see openshift/README.md)
+│   ├── cluster/   #   1. tfe-hvd-ocp-cluster (VPC, SGs, IAM, NLBs, DNS, RHCOS nodes)
+│   ├── config/    #   2. tfe-hvd-ocp-config  (*.apps DNS post-install)
+│   └── ...        #   3. tfe/ — TFE on OpenShift (built once the cluster is up)
 └── scripts/       # shared: create_tfe_secrets.sh (Secrets Manager bootstrap)
 ```
 
