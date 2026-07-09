@@ -129,8 +129,7 @@ log "Generated encryption password."
 DB_PASSWORD="$(openssl rand -base64 24 | tr -dc 'A-Za-z0-9!#%^&*()_-' | head -c 24)"
 log "Generated database password."
 
-# Redis password — used by the EKS deployment only. The EKS HVD module requires
-# 16-128 alphanumeric characters or symbols, excluding @, " and /.
+# charset per ElastiCache auth-token rules: no @, " or /
 REDIS_PASSWORD="$(openssl rand -base64 24 | tr -dc 'A-Za-z0-9!#%^&*()_-' | head -c 24)"
 log "Generated Redis password."
 
@@ -200,49 +199,42 @@ echo
 log "=== Creating / updating Secrets Manager secrets ==="
 echo
 
-# License — raw plaintext (not base64)
 ARN_LICENSE="$(create_or_update_secret \
   "${SECRET_PREFIX}/tfe-license" \
   "TFE license (.hclic contents)" \
   "--secret-string" "$TFE_LICENSE_CONTENT")"
 log "tfe_license_secret_arn             = $ARN_LICENSE"
 
-# Encryption password — raw plaintext (not base64)
 ARN_ENC_PW="$(create_or_update_secret \
   "${SECRET_PREFIX}/tfe-encryption-password" \
   "TFE encryption password" \
   "--secret-string" "$ENCRYPTION_PASSWORD")"
 log "tfe_encryption_password_secret_arn = $ARN_ENC_PW"
 
-# Database password — raw plaintext (not base64)
 ARN_DB_PW="$(create_or_update_secret \
   "${SECRET_PREFIX}/tfe-database-password" \
   "TFE RDS database password" \
   "--secret-string" "$DB_PASSWORD")"
 log "tfe_database_password_secret_arn   = $ARN_DB_PW"
 
-# Redis password — raw plaintext (not base64). EKS deployment only.
 ARN_REDIS_PW="$(create_or_update_secret \
   "${SECRET_PREFIX}/tfe-redis-password" \
-  "TFE Redis password (EKS deployment)" \
+  "TFE Redis password" \
   "--secret-string" "$REDIS_PASSWORD")"
 log "tfe_redis_password_secret_arn      = $ARN_REDIS_PW"
 
-# TLS cert — base64-encoded PEM
 ARN_TLS_CERT="$(create_or_update_secret \
   "${SECRET_PREFIX}/tfe-tls-cert" \
   "TFE TLS certificate (base64-encoded PEM)" \
   "--secret-string" "$TLS_CERT_B64")"
 log "tfe_tls_cert_secret_arn            = $ARN_TLS_CERT"
 
-# TLS private key — base64-encoded PEM
 ARN_TLS_KEY="$(create_or_update_secret \
   "${SECRET_PREFIX}/tfe-tls-privkey" \
   "TFE TLS private key (base64-encoded PEM)" \
   "--secret-string" "$TLS_KEY_B64")"
 log "tfe_tls_privkey_secret_arn         = $ARN_TLS_KEY"
 
-# CA bundle — base64-encoded PEM
 ARN_CA_BUNDLE="$(create_or_update_secret \
   "${SECRET_PREFIX}/tfe-tls-ca-bundle" \
   "TFE TLS CA bundle (base64-encoded PEM)" \
